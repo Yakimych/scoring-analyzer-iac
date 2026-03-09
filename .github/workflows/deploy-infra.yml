@@ -25,6 +25,8 @@ jobs:
       - name: SST Diff
         id: diff
         run: |
+          echo "Token length: ${#CLOUDFLARE_API_TOKEN}"
+          echo "Account ID length: ${#CLOUDFLARE_DEFAULT_ACCOUNT_ID}"
           npx sst diff --stage prod --print-logs
           OUTPUT=$(npx sst diff --stage prod 2>&1) || true
           echo "$OUTPUT"
