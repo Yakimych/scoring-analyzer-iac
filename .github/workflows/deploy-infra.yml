@@ -21,6 +21,7 @@ jobs:
         with:
           node-version: "20"
       - run: npm install
+      - run: npx sst install
       - name: SST Diff
         id: diff
         run: |
@@ -43,4 +44,5 @@ jobs:
         with:
           node-version: "20"
       - run: npm install
+      - run: npx sst install
       - run: npx sst deploy --stage prod
