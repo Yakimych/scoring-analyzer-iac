@@ -24,6 +24,7 @@ jobs:
       - name: SST Diff
         id: diff
         run: |
+          npx sst diff --stage prod --print-logs
           OUTPUT=$(npx sst diff --stage prod 2>&1) || true
           echo "$OUTPUT"
           if echo "$OUTPUT" | grep -q "No changes"; then
