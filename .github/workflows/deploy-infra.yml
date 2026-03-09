@@ -25,14 +25,12 @@ jobs:
       - name: SST Diff
         id: diff
         run: |
-          echo "Token length: ${#CLOUDFLARE_API_TOKEN}"
-          echo "Account ID length: ${#CLOUDFLARE_DEFAULT_ACCOUNT_ID}"
           OUTPUT=$(npx sst diff --stage prod 2>&1) || true
           echo "$OUTPUT"
-          if echo "$OUTPUT" | grep -q "No changes"; then
-            echo "has_changes=false" >> "$GITHUB_OUTPUT"
-          else
+          if echo "$OUTPUT" | grep -qE '^[+*-]  '; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
           fi
 
   deploy:
