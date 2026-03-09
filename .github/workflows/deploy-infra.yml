@@ -13,9 +13,6 @@ env:
 jobs:
   plan:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra
     outputs:
       has_changes: ${{ steps.diff.outputs.has_changes }}
     steps:
