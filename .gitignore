@@ -1,0 +1,11 @@
+.DS_Store
+node_modules
+wip
+
+output.log
+errors.log
+pr-body.md
+.env.local
+.env
+
+.sst/
