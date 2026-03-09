@@ -39,9 +39,6 @@ jobs:
     needs: plan
     if: github.ref == 'refs/heads/main' && needs.plan.outputs.has_changes == 'true'
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: infra
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
