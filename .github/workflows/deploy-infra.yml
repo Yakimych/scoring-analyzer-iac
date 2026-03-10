@@ -29,8 +29,10 @@ jobs:
           echo "$OUTPUT"
           if echo "$OUTPUT" | grep -qE '^[+*-]  '; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Changes detected — deployment will require approval."
           else
             echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No changes to be made, deployment step will be skipped."
           fi
 
   deploy:
