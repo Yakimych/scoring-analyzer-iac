@@ -4,19 +4,19 @@ overview: Scaffold a T3 Stack app (Next.js + tRPC + Drizzle + Tailwind) in an `a
 todos:
   - id: scaffold-t3
     content: Scaffold T3 app in `app/` subfolder using create-t3-app with Drizzle, Postgres, tRPC, Tailwind, App Router
-    status: pending
+    status: completed
   - id: configure-drizzle-supabase
     content: "Modify `app/src/server/db/index.ts` and `app/drizzle.config.ts` to use Supabase Postgres pooler with `prepare: false`"
-    status: pending
+    status: completed
   - id: update-sst-config
     content: Add Vercel provider to sst.config.ts, create vercel.Project and vercel.ProjectEnvironmentVariables with DATABASE_URL
-    status: pending
+    status: completed
   - id: update-github-workflow
     content: Add VERCEL_API_TOKEN to the GitHub Actions workflow env block
-    status: pending
+    status: completed
   - id: verify-env-setup
     content: Document required env vars (VERCEL_API_TOKEN) and verify .env / .gitignore setup
-    status: pending
+    status: completed
 isProject: false
 ---
 
