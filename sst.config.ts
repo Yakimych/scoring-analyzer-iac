@@ -26,10 +26,9 @@ export default $config({
     const vercelProject = new vercel.Project("ScoringAnalyzerWeb", {
       name: "scoring-analyzer",
       framework: "nextjs",
-      rootDirectory: "app",
       gitRepository: {
         type: "github",
-        repo: "yakimych/scoring-analyzer-iac",
+        repo: "yakimych/scoring-analyzer-web",
       },
     });
 
