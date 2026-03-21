@@ -17,7 +17,7 @@ You need accounts on two services:
 
 ## Required secrets
 
-Five secrets must be configured in GitHub at **Settings > Secrets and variables > Actions**.
+Six secrets must be configured in GitHub at **Settings > Secrets and variables > Actions**.
 
 ### Cloudflare (SST state storage)
 
@@ -33,6 +33,12 @@ Five secrets must be configured in GitHub at **Settings > Secrets and variables 
 | `SUPABASE_ACCESS_TOKEN` | Go to https://supabase.com/dashboard/account/tokens > **Generate new token**. Give it a name and copy the token value.                                                                 |
 | `SUPABASE_ORG_ID`       | Go to https://supabase.com/dashboard > click your organization. The **slug** is visible in the URL (`app.supabase.com/org/<slug>`) and also under **Organization Settings > General**. |
 | `SUPABASE_DB_PASSWORD`  | A strong password for the Postgres database (set once when the project is created). Generate one with the command below.                                                               |
+
+### Vercel (app deployment)
+
+| Secret             | How to get it                                                                                                                                                                                                                                                           |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VERCEL_API_TOKEN` | Go to https://vercel.com/account/tokens > **Create Token**. Give it a descriptive name (e.g. `sst-deploy`), pick a scope (your personal account or team), and set an expiration. Copy the token value immediately — it won't be shown again. |
 
 Generate a random password:
 
@@ -57,6 +63,7 @@ CLOUDFLARE_API_TOKEN=...
 SUPABASE_ACCESS_TOKEN=...
 SUPABASE_ORG_ID=...
 SUPABASE_DB_PASSWORD=...
+VERCEL_API_TOKEN=...
 ```
 
 Then run:
