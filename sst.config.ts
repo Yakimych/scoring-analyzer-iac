@@ -21,7 +21,7 @@ export default $config({
       region,
     });
 
-    const databaseUrl = $interpolate`postgres://postgres.${supabaseProject.id}:${encodeURIComponent(dbPassword)}@aws-0-${region}.pooler.supabase.com:6543/postgres`;
+    const databaseUrl = $interpolate`postgresql://postgres.${supabaseProject.id}:${dbPassword}@aws-1-${region}.pooler.supabase.com:6543/postgres`;
 
     const vercelProject = new vercel.Project("ScoringAnalyzerWeb", {
       name: "scoring-analyzer",
