@@ -9,3 +9,4 @@ pr-body.md
 .env
 
 .sst/
+.pnpm-store/

@@ -4,5 +4,8 @@
   "type": "module",
   "dependencies": {
     "sst": "^4.2.2"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2"
   }
 }
