@@ -52,7 +52,23 @@ export default $config({
     //   integration-management:read, integration-management:write,
     //   stack-dashboards:read, stack-dashboards:write,
     //   rules:read, rules:write
-    // Requires SUPABASE_SERVICE_ROLE_KEY env var for metrics endpoint auth
+
+    // Fetch the service_role key from the Supabase Management API
+    const serviceRoleKey = supabaseProject.id.apply(async (ref) => {
+      const res = await fetch(
+        `https://api.supabase.com/v1/projects/${ref}/api-keys`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.SUPABASE_ACCESS_TOKEN}`,
+          },
+        },
+      );
+      if (!res.ok) throw new Error(`Failed to fetch API keys: ${res.status}`);
+      const keys = (await res.json()) as { name: string; api_key: string }[];
+      const sr = keys.find((k) => k.name === "service_role");
+      if (!sr) throw new Error("service_role key not found");
+      return sr.api_key;
+    });
 
     const grafanaStack = new grafana.cloud.Stack("ScoringAnalyzerGrafana", {
       name: "scoring-analyzer",
@@ -108,7 +124,7 @@ export default $config({
         enabled: true,
         authenticationMethod: "basic",
         authenticationBasicUsername: "service_role",
-        authenticationBasicPassword: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        authenticationBasicPassword: serviceRoleKey,
         url: $interpolate`https://${supabaseProject.id}.supabase.co/customer/v1/privileged/metrics`,
         scrapeIntervalSeconds: 60,
       },
