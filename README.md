@@ -5,8 +5,29 @@ This directory contains the Infrastructure as Code (IaC) for the ScoringAnalyzer
 ## What it deploys
 
 - A Supabase Postgres database project (`scoring-analyzer`, free-tier `micro` instance in `eu-central-1`)
+- A Grafana Cloud stack with the Supabase integration (pre-built dashboards for 200+ database metrics)
+- A metrics scrape job that pulls Supabase Prometheus metrics into Grafana Cloud every 60s
 
 Infrastructure state is stored in Cloudflare R2 (free tier).
+
+### Workaround: service_role key via HTTP
+
+The Supabase `service_role` key (needed for the Grafana metrics scrape job) is currently fetched at deploy time via a raw HTTP call to the Supabase Management API (`GET /v1/projects/{ref}/api-keys`). This is a workaround because the SST-packaged Supabase provider (`@sst-provider/supabase`) is pinned at v1.4.1, which predates the `getApikeys` data source added in upstream v1.5.0.
+
+**When `@sst-provider/supabase` publishes ≥1.5.0**, replace the HTTP workaround with:
+
+```ts
+// 1. Bump the provider version in sst.config.ts
+providers: { supabase: "1.5.0", ... }
+
+// 2. Replace the fetch() block with:
+const supabaseApiKeys = supabase.getApikeysOutput({
+  projectRef: supabaseProject.id,
+});
+
+// 3. Use supabaseApiKeys.serviceRoleKey instead of serviceRoleKey
+authenticationBasicPassword: supabaseApiKeys.serviceRoleKey,
+```
 
 ## Prerequisites
 
@@ -40,6 +61,12 @@ Six secrets must be configured in GitHub at **Settings > Secrets and variables >
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `VERCEL_API_TOKEN` | Go to https://vercel.com/account/tokens > **Create Token**. Give it a descriptive name (e.g. `sst-deploy`), pick a scope (your personal account or team), and set an expiration. Copy the token value immediately — it won't be shown again. |
 
+### Grafana Cloud (metrics monitoring)
+
+| Secret                              | How to get it                                                                                                                                                                                                                                                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GRAFANA_CLOUD_ACCESS_POLICY_TOKEN` | Go to https://grafana.com/orgs > select your org > **Security > Access Policies** > **Create access policy**. Add scopes: `stacks:read`, `stacks:write`, `stacks:delete`, `stack-service-accounts:write`, `integration-management:read`, `integration-management:write`, `stack-dashboards:read`, `stack-dashboards:write`, `rules:read`, `rules:write`. Then create a token for the policy and copy the value. |
+
 Generate a random password:
 
 ```sh
@@ -64,6 +91,7 @@ SUPABASE_ACCESS_TOKEN=...
 SUPABASE_ORG_ID=...
 SUPABASE_DB_PASSWORD=...
 VERCEL_API_TOKEN=...
+GRAFANA_CLOUD_ACCESS_POLICY_TOKEN=...
 ```
 
 Then run:
