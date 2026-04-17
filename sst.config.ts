@@ -7,6 +7,7 @@ export default $config({
       providers: {
         supabase: "1.4.1",
         vercel: "4.6.0",
+        grafana: "2.25.1",
       },
     };
   },
@@ -44,9 +45,81 @@ export default $config({
       ],
     });
 
+    // --- Grafana Cloud: Supabase metrics monitoring ---
+    // Requires GRAFANA_CLOUD_ACCESS_POLICY_TOKEN env var with scopes:
+    //   stacks:read, stacks:write, stacks:delete,
+    //   stack-service-accounts:write,
+    //   integration-management:read, integration-management:write,
+    //   stack-dashboards:read, stack-dashboards:write,
+    //   rules:read, rules:write
+    // Requires SUPABASE_SERVICE_ROLE_KEY env var for metrics endpoint auth
+
+    const grafanaStack = new grafana.cloud.Stack("ScoringAnalyzerGrafana", {
+      name: "scoring-analyzer",
+      slug: "scoring-analyzer",
+      regionSlug: "eu",
+      description: "Grafana Cloud stack for Scoring Analyzer Supabase metrics",
+    });
+
+    const grafanaServiceAccount = new grafana.cloud.StackServiceAccount(
+      "GrafanaServiceAccount",
+      {
+        stackSlug: grafanaStack.slug,
+        name: "sst-managed",
+        role: "Admin",
+      },
+    );
+
+    const grafanaServiceAccountToken =
+      new grafana.cloud.StackServiceAccountToken("GrafanaServiceAccountToken", {
+        stackSlug: grafanaStack.slug,
+        name: "sst-managed-token",
+        serviceAccountId: grafanaServiceAccount.id,
+      });
+
+    // Stack-scoped provider for managing dashboards/folders inside the stack
+    const grafanaStackProvider = new grafana.Provider("GrafanaStackProvider", {
+      auth: grafanaServiceAccountToken.key,
+      url: grafanaStack.url.apply((url) => url as string),
+    });
+
+    // Install the Supabase integration (pre-built dashboards + alert rules)
+    const supabaseIntegration = new grafana.cloud.Integration(
+      "SupabaseIntegration",
+      { slug: "supabase" },
+    );
+
+    // Connections API provider for managing metrics scrape jobs
+    const connectionsProvider = new grafana.Provider(
+      "GrafanaConnectionsProvider",
+      {
+        connectionsApiUrl: grafanaStack.connectionsApiUrl,
+        connectionsApiAccessToken:
+          process.env.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN!,
+      },
+    );
+
+    // Scrape Supabase metrics endpoint every 60s
+    new grafana.connections.MetricsEndpointScrapeJob(
+      "SupabaseMetricsScrapeJob",
+      {
+        stackId: grafanaStack.id,
+        name: "supabase-scoring-analyzer",
+        enabled: true,
+        authenticationMethod: "basic",
+        authenticationBasicUsername: "service_role",
+        authenticationBasicPassword: process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        url: $interpolate`https://${supabaseProject.id}.supabase.co/customer/v1/privileged/metrics`,
+        scrapeIntervalSeconds: 60,
+      },
+      { provider: connectionsProvider },
+    );
+
     return {
       projectId: supabaseProject.id,
       vercelProjectId: vercelProject.id,
+      grafanaStackUrl: grafanaStack.url,
+      grafanaDashboardFolder: supabaseIntegration.dashboardFolder,
     };
   },
 });
