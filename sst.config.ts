@@ -71,8 +71,8 @@ export default $config({
     });
 
     const grafanaStack = new grafana.cloud.Stack("ScoringAnalyzerGrafana", {
-      name: "scoring-analyzer",
-      slug: "scoring-analyzer",
+      name: "scoringanalyzer",
+      slug: "scoringanalyzer",
       regionSlug: "eu",
       description: "Grafana Cloud stack for Scoring Analyzer Supabase metrics",
     });
@@ -93,26 +93,21 @@ export default $config({
         serviceAccountId: grafanaServiceAccount.id,
       });
 
-    // Stack-scoped provider for managing dashboards/folders inside the stack
+    // Stack-scoped provider with cloud + connections access
     const grafanaStackProvider = new grafana.Provider("GrafanaStackProvider", {
+      cloudAccessPolicyToken: process.env.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN!,
       auth: grafanaServiceAccountToken.key,
       url: grafanaStack.url.apply((url) => url as string),
+      connectionsApiUrl: grafanaStack.connectionsApiUrl,
+      connectionsApiAccessToken:
+        process.env.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN!,
     });
 
     // Install the Supabase integration (pre-built dashboards + alert rules)
     const supabaseIntegration = new grafana.cloud.Integration(
       "SupabaseIntegration",
       { slug: "supabase" },
-    );
-
-    // Connections API provider for managing metrics scrape jobs
-    const connectionsProvider = new grafana.Provider(
-      "GrafanaConnectionsProvider",
-      {
-        connectionsApiUrl: grafanaStack.connectionsApiUrl,
-        connectionsApiAccessToken:
-          process.env.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN!,
-      },
+      { provider: grafanaStackProvider },
     );
 
     // Scrape Supabase metrics endpoint every 60s
@@ -128,7 +123,7 @@ export default $config({
         url: $interpolate`https://${supabaseProject.id}.supabase.co/customer/v1/privileged/metrics`,
         scrapeIntervalSeconds: 60,
       },
-      { provider: connectionsProvider },
+      { provider: grafanaStackProvider },
     );
 
     return {
