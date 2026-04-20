@@ -27,8 +27,15 @@ jobs:
       - name: SST Diff
         id: diff
         run: |
-          OUTPUT=$(npx sst diff --stage prod 2>&1) || true
+          set +e
+          OUTPUT=$(npx sst diff --stage prod 2>&1)
+          EXIT_CODE=$?
+          set -e
           echo "$OUTPUT"
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::error::SST diff failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
           if echo "$OUTPUT" | grep -qE '^[+*-]  '; then
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
             echo "::notice::Changes detected — deployment will require approval."
