@@ -110,7 +110,7 @@ export default $config({
       { provider: grafanaStackProvider },
     );
 
-    // Scrape Supabase metrics endpoint every 60s
+    // Scrape Supabase metrics endpoint every 120s
     new grafana.connections.MetricsEndpointScrapeJob(
       "SupabaseMetricsScrapeJob",
       {
@@ -121,7 +121,7 @@ export default $config({
         authenticationBasicUsername: "service_role",
         authenticationBasicPassword: serviceRoleKey,
         url: $interpolate`https://${supabaseProject.id}.supabase.co/customer/v1/privileged/metrics`,
-        scrapeIntervalSeconds: 60,
+        scrapeIntervalSeconds: 120,
       },
       { provider: grafanaStackProvider },
     );
