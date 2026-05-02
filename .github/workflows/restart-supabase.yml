@@ -1,4 +1,4 @@
-name: Restart Supabase
+name: Restart Supabase Project
 
 on:
   repository_dispatch:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       reason:
-        description: Why the Supabase database should be restarted
+        description: Why the Supabase project should be restarted
         required: false
         default: manual
 
@@ -21,6 +21,8 @@ concurrency:
 env:
   COOLDOWN_SECONDS: "600"
   MARKER_ARTIFACT_NAME: supabase-restart-marker-rlyhhlwyzeqhoxlralre
+  PAUSE_TIMEOUT_SECONDS: "600"
+  RESTORE_TIMEOUT_SECONDS: "900"
   SUPABASE_PROJECT_REF: rlyhhlwyzeqhoxlralre
 
 jobs:
@@ -127,7 +129,7 @@ jobs:
           path: supabase-restart-marker.json
           retention-days: 7
 
-      - name: Restart Supabase database
+      - name: Restart Supabase project
         if: steps.cooldown.outputs.allowed == 'true'
         env:
           PROJECT_REF: ${{ steps.request.outputs.project_ref }}
@@ -140,22 +142,83 @@ jobs:
             exit 1
           fi
 
-          response_file="$(mktemp)"
-          http_status="$(
-            curl -sS -o "$response_file" -w "%{http_code}" \
-              -X PUT "https://api.supabase.com/v1/projects/${PROJECT_REF}/config/database/postgres" \
-              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
-              -H "Content-Type: application/json" \
-              --data '{"restart_database":true}'
-          )"
+          supabase_api() {
+            local method="$1"
+            local path="$2"
+            local data="${3:-}"
+            local response_file
+            local http_status
 
-          if [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
-            echo "::error::Supabase restart request failed with HTTP ${http_status}."
+            response_file="$(mktemp)"
+            if [ -n "$data" ]; then
+              http_status="$(
+                curl -sS -o "$response_file" -w "%{http_code}" \
+                  -X "$method" "https://api.supabase.com${path}" \
+                  -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+                  -H "Content-Type: application/json" \
+                  --data "$data"
+              )"
+            else
+              http_status="$(
+                curl -sS -o "$response_file" -w "%{http_code}" \
+                  -X "$method" "https://api.supabase.com${path}" \
+                  -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+                  -H "Content-Type: application/json"
+              )"
+            fi
+
+            if [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
+              echo "::error::Supabase API ${method} ${path} failed with HTTP ${http_status}."
+              cat "$response_file"
+              exit 1
+            fi
+
             cat "$response_file"
+          }
+
+          project_status() {
+            supabase_api GET "/v1/projects/${PROJECT_REF}" | jq -r '.status // "UNKNOWN"'
+          }
+
+          wait_for_status() {
+            local timeout_seconds="$1"
+            local desired_regex="$2"
+            local label="$3"
+            local elapsed_seconds=0
+            local status
+
+            while [ "$elapsed_seconds" -le "$timeout_seconds" ]; do
+              status="$(project_status)"
+              echo "Supabase project status while waiting for ${label}: ${status}"
+
+              if [[ "$status" =~ $desired_regex ]]; then
+                return 0
+              fi
+
+              sleep 15
+              elapsed_seconds="$((elapsed_seconds + 15))"
+            done
+
+            echo "::error::Timed out waiting for Supabase project to reach ${label}."
             exit 1
+          }
+
+          current_status="$(project_status)"
+          echo "Initial Supabase project status: ${current_status}"
+
+          if [[ "$current_status" =~ ^(INACTIVE|PAUSED)$ ]]; then
+            echo "Project is already paused; restoring it."
+          else
+            echo "Pausing Supabase project ${PROJECT_REF}."
+            supabase_api POST "/v1/projects/${PROJECT_REF}/pause" > /dev/null
+            wait_for_status "$PAUSE_TIMEOUT_SECONDS" "^(INACTIVE|PAUSED)$" "paused"
           fi
 
-          echo "Supabase restart request accepted with HTTP ${http_status}."
+          echo "Restoring Supabase project ${PROJECT_REF}."
+          supabase_api POST "/v1/projects/${PROJECT_REF}/restore" > /dev/null
+          wait_for_status "$RESTORE_TIMEOUT_SECONDS" "^ACTIVE" "active"
+
+          echo "Supabase project restart completed."
 
       - name: Summarize
         if: always()

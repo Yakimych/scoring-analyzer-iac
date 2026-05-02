@@ -51,7 +51,7 @@ Seven secrets must be configured in GitHub at **Settings > Secrets and variables
 
 | Secret                  | How to get it                                                                                                                                                                          |
 | ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SUPABASE_ACCESS_TOKEN` | Go to https://supabase.com/dashboard/account/tokens > **Generate new token**. Give it a name and copy the token value. The restart workflow needs database config write access.       |
+| `SUPABASE_ACCESS_TOKEN` | Go to https://supabase.com/dashboard/account/tokens > **Generate new token**. Give it a name and copy the token value. The restart workflow needs project admin write access.         |
 | `SUPABASE_ORG_ID`       | Go to https://supabase.com/dashboard > click your organization. The **slug** is visible in the URL (`app.supabase.com/org/<slug>`) and also under **Organization Settings > General**. |
 | `SUPABASE_DB_PASSWORD`  | A strong password for the Postgres database (set once when the project is created). Generate one with the command below.                                                               |
 
@@ -103,9 +103,11 @@ SCORING_ANALYZER_ALERT_DISPATCH_TOKEN=...
 
 ## Supabase restart automation
 
-The `Restart Supabase` GitHub Actions workflow is triggered by Grafana alert webhooks using the `repository_dispatch` event type `supabase_restart_requested`. It can also be run manually from GitHub Actions.
+The `Restart Supabase Project` GitHub Actions workflow is triggered by Grafana alert webhooks using the `repository_dispatch` event type `supabase_restart_requested`. It can also be run manually from GitHub Actions.
 
-To prevent repeated database restarts during a noisy incident, the workflow serializes all restart runs and checks for a recent `supabase-restart-marker-rlyhhlwyzeqhoxlralre` artifact before calling the Supabase Management API. If a marker was created in the last 10 minutes, the run exits without calling the restart endpoint.
+To prevent repeated project restarts during a noisy incident, the workflow serializes all restart runs and checks for a recent `supabase-restart-marker-rlyhhlwyzeqhoxlralre` artifact before calling the Supabase Management API. If a marker was created in the last 10 minutes, the run exits without calling the restart endpoint.
+
+The project restart is implemented with the documented Supabase Management API project lifecycle endpoints: pause the project, wait until it is inactive, then restore it and wait until it is active again.
 
 Then run:
 
