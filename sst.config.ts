@@ -18,6 +18,16 @@ export default $config({
     const grafanaExpressionDatasourceUid = "-100";
     const supabaseAlertRunbookUrl =
       "https://supabase.com/docs/guides/troubleshooting/supabase-grafana-memory-charts";
+    const githubAlertDispatchRepository =
+      process.env.GITHUB_ALERT_DISPATCH_REPOSITORY ??
+      "Yakimych/scoring-analyzer-iac";
+    const githubAlertDispatchToken =
+      process.env.SCORING_ANALYZER_ALERT_DISPATCH_TOKEN ??
+      (() => {
+        throw new Error(
+          "SCORING_ANALYZER_ALERT_DISPATCH_TOKEN is required to let Grafana trigger the Supabase restart GitHub Action.",
+        );
+      })();
 
     const compactPromQl = (query: string) => query.replace(/\s+/g, " ").trim();
 
@@ -158,8 +168,7 @@ export default $config({
       auth: grafanaServiceAccountToken.key,
       url: grafanaStack.url.apply((url) => url as string),
       connectionsApiUrl: grafanaStack.connectionsApiUrl,
-      connectionsApiAccessToken:
-        process.env.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN!,
+      connectionsApiAccessToken: process.env.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN!,
     });
 
     // Install the Supabase integration (pre-built dashboards + alert rules)
@@ -175,6 +184,34 @@ export default $config({
         uid: "scoring-analyzer-supabase-alerts",
         title: "Scoring Analyzer Supabase Alerts",
         preventDestroyIfNotEmpty: true,
+      },
+      { provider: grafanaStackProvider },
+    );
+
+    const supabaseRestartContactPoint = new grafana.alerting.ContactPoint(
+      "SupabaseRestartGitHubDispatchContactPoint",
+      {
+        name: "supabase-restart-github-dispatch",
+        webhooks: [
+          {
+            url: `https://api.github.com/repos/${githubAlertDispatchRepository}/dispatches`,
+            httpMethod: "POST",
+            authorizationScheme: "Bearer",
+            authorizationCredentials: githubAlertDispatchToken,
+            headers: {
+              Accept: "application/vnd.github+json",
+              "X-GitHub-Api-Version": "2022-11-28",
+            },
+            disableResolveMessage: true,
+            maxAlerts: 1,
+            payload: {
+              template: `{{ coll.Dict "event_type" "supabase_restart_requested" "client_payload" (coll.Dict "source" "grafana" "status" .Status "project_ref" .Vars.project_ref "alertname" .CommonLabels.alertname "severity" .CommonLabels.severity "symptom" .CommonLabels.symptom "group_key" .GroupKey) | data.ToJSON }}`,
+              vars: {
+                project_ref: supabaseProject.id,
+              },
+            },
+          },
+        ],
       },
       { provider: grafanaStackProvider },
     );
@@ -256,8 +293,14 @@ export default $config({
           {
             uid: "supabase-memory-pressure",
             name: "Supabase memory pressure",
-            "for": "10m",
+            for: "10m",
             condition: "B",
+            notificationSettings: {
+              contactPoint: supabaseRestartContactPoint.name,
+              groupInterval: "10m",
+              groupWait: "30s",
+              repeatInterval: "10m",
+            },
             noDataState: "Alerting",
             execErrState: "Alerting",
             annotations: {
@@ -303,8 +346,14 @@ export default $config({
           {
             uid: "supabase-metrics-missing",
             name: "Supabase metrics missing",
-            "for": "10m",
+            for: "10m",
             condition: "B",
+            notificationSettings: {
+              contactPoint: supabaseRestartContactPoint.name,
+              groupInterval: "10m",
+              groupWait: "30s",
+              repeatInterval: "10m",
+            },
             noDataState: "Alerting",
             execErrState: "Alerting",
             annotations: {
@@ -355,6 +404,7 @@ export default $config({
         dependsOn: [
           supabaseIntegration,
           supabaseAlertsFolder,
+          supabaseRestartContactPoint,
           supabaseMetricsScrapeJob,
         ],
       },
@@ -367,6 +417,7 @@ export default $config({
       grafanaDashboardFolder: supabaseIntegration.dashboardFolder,
       grafanaSupabaseAlertsFolder: supabaseAlertsFolder.url,
       grafanaSupabaseHealthAlertGroup: supabaseHealthAlerts.name,
+      grafanaSupabaseRestartContactPoint: supabaseRestartContactPoint.name,
     };
   },
 });
