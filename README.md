@@ -107,6 +107,8 @@ The `Restart Supabase Project` GitHub Actions workflow is triggered by Grafana a
 
 To prevent repeated project restarts during a noisy incident, the workflow serializes all restart runs and checks for a recent `supabase-restart-marker-rlyhhlwyzeqhoxlralre` artifact before calling the Supabase Management API. If a marker was created in the last 10 minutes, the run exits without calling the restart endpoint.
 
+Grafana passes `restart_only_if_unhealthy=true`, so the workflow skips the restart when Supabase reports `ACTIVE_HEALTHY`. Manual runs expose the same parameter and default it to `false` so an operator can force a restart.
+
 The project restart is implemented with the documented Supabase Management API project lifecycle endpoints: pause the project, wait until it is inactive, then restore it and wait until it is active again.
 
 Then run:

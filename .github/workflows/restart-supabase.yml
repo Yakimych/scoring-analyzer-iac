@@ -9,6 +9,11 @@ on:
         description: Why the Supabase project should be restarted
         required: false
         default: manual
+      restart_only_if_unhealthy:
+        description: Skip restart when Supabase reports ACTIVE_HEALTHY
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   actions: write
@@ -36,7 +41,9 @@ jobs:
           DISPATCH_REASON: ${{ github.event.client_payload.reason }}
           DISPATCH_ALERTNAME: ${{ github.event.client_payload.alertname }}
           DISPATCH_STATUS: ${{ github.event.client_payload.status }}
+          DISPATCH_RESTART_ONLY_IF_UNHEALTHY: ${{ github.event.client_payload.restart_only_if_unhealthy }}
           MANUAL_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.reason || '' }}
+          MANUAL_RESTART_ONLY_IF_UNHEALTHY: ${{ github.event_name == 'workflow_dispatch' && inputs.restart_only_if_unhealthy || false }}
         run: |
           set -euo pipefail
 
@@ -49,6 +56,20 @@ jobs:
           reason="${DISPATCH_REASON:-${MANUAL_REASON:-grafana-alert}}"
           alertname="${DISPATCH_ALERTNAME:-manual}"
           status="${DISPATCH_STATUS:-firing}"
+          restart_only_if_unhealthy="${DISPATCH_RESTART_ONLY_IF_UNHEALTHY:-${MANUAL_RESTART_ONLY_IF_UNHEALTHY:-false}}"
+
+          case "$restart_only_if_unhealthy" in
+            true | True | TRUE | 1 | yes | Yes | YES)
+              restart_only_if_unhealthy=true
+              ;;
+            false | False | FALSE | 0 | no | No | NO | "")
+              restart_only_if_unhealthy=false
+              ;;
+            *)
+              echo "::error::restart_only_if_unhealthy must be true or false, got '$restart_only_if_unhealthy'."
+              exit 1
+              ;;
+          esac
 
           if [ "$GITHUB_EVENT_NAME" = "repository_dispatch" ] && [ "$status" != "firing" ]; then
             echo "::notice::Ignoring non-firing Grafana notification with status '$status'."
@@ -61,6 +82,7 @@ jobs:
             echo "project_ref=$project_ref"
             echo "reason=$reason"
             echo "alertname=$alertname"
+            echo "restart_only_if_unhealthy=$restart_only_if_unhealthy"
           } >> "$GITHUB_OUTPUT"
 
       - name: Check restart cooldown
@@ -101,12 +123,54 @@ jobs:
 
           echo "allowed=true" >> "$GITHUB_OUTPUT"
 
-      - name: Write restart marker
+      - name: Check Supabase project health guard
+        id: health
         if: steps.cooldown.outputs.allowed == 'true'
+        env:
+          PROJECT_REF: ${{ steps.request.outputs.project_ref }}
+          RESTART_ONLY_IF_UNHEALTHY: ${{ steps.request.outputs.restart_only_if_unhealthy }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN is required."
+            exit 1
+          fi
+
+          response_file="$(mktemp)"
+          http_status="$(
+            curl -sS -o "$response_file" -w "%{http_code}" \
+              -X GET "https://api.supabase.com/v1/projects/${PROJECT_REF}" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H "Content-Type: application/json"
+          )"
+
+          if [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
+            echo "::error::Supabase API GET /v1/projects/${PROJECT_REF} failed with HTTP ${http_status}."
+            cat "$response_file"
+            exit 1
+          fi
+
+          current_status="$(jq -r '.status // "UNKNOWN"' "$response_file")"
+          echo "Current Supabase project status: ${current_status}"
+          echo "current_status=$current_status" >> "$GITHUB_OUTPUT"
+
+          if [ "$RESTART_ONLY_IF_UNHEALTHY" = "true" ] && [ "$current_status" = "ACTIVE_HEALTHY" ]; then
+            echo "::notice::Skipping Supabase restart because restart_only_if_unhealthy=true and project status is ACTIVE_HEALTHY."
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "allowed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Write restart marker
+        if: steps.health.outputs.allowed == 'true'
         env:
           ALERTNAME: ${{ steps.request.outputs.alertname }}
           PROJECT_REF: ${{ steps.request.outputs.project_ref }}
           REASON: ${{ steps.request.outputs.reason }}
+          RESTART_ONLY_IF_UNHEALTHY: ${{ steps.request.outputs.restart_only_if_unhealthy }}
         run: |
           set -euo pipefail
 
@@ -116,13 +180,14 @@ jobs:
             "project_ref": "$PROJECT_REF",
             "reason": "$REASON",
             "alertname": "$ALERTNAME",
+            "restart_only_if_unhealthy": "$RESTART_ONLY_IF_UNHEALTHY",
             "run_id": "$GITHUB_RUN_ID",
             "run_attempt": "$GITHUB_RUN_ATTEMPT"
           }
           EOF
 
       - name: Save restart marker
-        if: steps.cooldown.outputs.allowed == 'true'
+        if: steps.health.outputs.allowed == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.MARKER_ARTIFACT_NAME }}
@@ -130,8 +195,9 @@ jobs:
           retention-days: 7
 
       - name: Restart Supabase project
-        if: steps.cooldown.outputs.allowed == 'true'
+        if: steps.health.outputs.allowed == 'true'
         env:
+          INITIAL_STATUS: ${{ steps.health.outputs.current_status }}
           PROJECT_REF: ${{ steps.request.outputs.project_ref }}
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
         run: |
@@ -203,7 +269,7 @@ jobs:
             exit 1
           }
 
-          current_status="$(project_status)"
+          current_status="${INITIAL_STATUS:-$(project_status)}"
           echo "Initial Supabase project status: ${current_status}"
 
           if [[ "$current_status" =~ ^(INACTIVE|PAUSED)$ ]]; then
@@ -224,8 +290,11 @@ jobs:
         if: always()
         env:
           COOLDOWN_ALLOWED: ${{ steps.cooldown.outputs.allowed }}
+          HEALTH_ALLOWED: ${{ steps.health.outputs.allowed }}
+          INITIAL_STATUS: ${{ steps.health.outputs.current_status }}
           REQUEST_ALLOWED: ${{ steps.request.outputs.allowed }}
           PROJECT_REF: ${{ steps.request.outputs.project_ref }}
+          RESTART_ONLY_IF_UNHEALTHY: ${{ steps.request.outputs.restart_only_if_unhealthy }}
         run: |
           {
             echo "## Supabase restart"
@@ -233,5 +302,8 @@ jobs:
             echo "- Project ref: ${PROJECT_REF:-$SUPABASE_PROJECT_REF}"
             echo "- Request accepted: ${REQUEST_ALLOWED:-false}"
             echo "- Cooldown allowed restart: ${COOLDOWN_ALLOWED:-false}"
+            echo "- Health guard allowed restart: ${HEALTH_ALLOWED:-false}"
+            echo "- Initial status: ${INITIAL_STATUS:-unknown}"
+            echo "- Restart only if unhealthy: ${RESTART_ONLY_IF_UNHEALTHY:-false}"
             echo "- Cooldown: ${COOLDOWN_SECONDS}s"
           } >> "$GITHUB_STEP_SUMMARY"

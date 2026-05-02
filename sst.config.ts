@@ -205,7 +205,7 @@ export default $config({
             disableResolveMessage: true,
             maxAlerts: 1,
             payload: {
-              template: `{{ coll.Dict "event_type" "supabase_restart_requested" "client_payload" (coll.Dict "source" "grafana" "status" .Status "project_ref" .Vars.project_ref "alertname" .CommonLabels.alertname "severity" .CommonLabels.severity "symptom" .CommonLabels.symptom "group_key" .GroupKey) | data.ToJSON }}`,
+              template: `{{ coll.Dict "event_type" "supabase_restart_requested" "client_payload" (coll.Dict "source" "grafana" "status" .Status "project_ref" .Vars.project_ref "restart_only_if_unhealthy" true "alertname" .CommonLabels.alertname "severity" .CommonLabels.severity "symptom" .CommonLabels.symptom "group_key" .GroupKey) | data.ToJSON }}`,
               vars: {
                 project_ref: supabaseProject.id,
               },
