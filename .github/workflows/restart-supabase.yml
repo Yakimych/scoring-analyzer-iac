@@ -1,0 +1,174 @@
+name: Restart Supabase
+
+on:
+  repository_dispatch:
+    types: [supabase_restart_requested]
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: Why the Supabase database should be restarted
+        required: false
+        default: manual
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: supabase-restart
+  cancel-in-progress: false
+
+env:
+  COOLDOWN_SECONDS: "600"
+  MARKER_ARTIFACT_NAME: supabase-restart-marker-rlyhhlwyzeqhoxlralre
+  SUPABASE_PROJECT_REF: rlyhhlwyzeqhoxlralre
+
+jobs:
+  restart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve request
+        id: request
+        env:
+          DISPATCH_PROJECT_REF: ${{ github.event.client_payload.project_ref }}
+          DISPATCH_REASON: ${{ github.event.client_payload.reason }}
+          DISPATCH_ALERTNAME: ${{ github.event.client_payload.alertname }}
+          DISPATCH_STATUS: ${{ github.event.client_payload.status }}
+          MANUAL_REASON: ${{ github.event_name == 'workflow_dispatch' && inputs.reason || '' }}
+        run: |
+          set -euo pipefail
+
+          project_ref="${DISPATCH_PROJECT_REF:-$SUPABASE_PROJECT_REF}"
+          if [ "$project_ref" != "$SUPABASE_PROJECT_REF" ]; then
+            echo "::error::Refusing to restart unexpected Supabase project '$project_ref'."
+            exit 1
+          fi
+
+          reason="${DISPATCH_REASON:-${MANUAL_REASON:-grafana-alert}}"
+          alertname="${DISPATCH_ALERTNAME:-manual}"
+          status="${DISPATCH_STATUS:-firing}"
+
+          if [ "$GITHUB_EVENT_NAME" = "repository_dispatch" ] && [ "$status" != "firing" ]; then
+            echo "::notice::Ignoring non-firing Grafana notification with status '$status'."
+            echo "allowed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "allowed=true"
+            echo "project_ref=$project_ref"
+            echo "reason=$reason"
+            echo "alertname=$alertname"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check restart cooldown
+        id: cooldown
+        if: steps.request.outputs.allowed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          now_epoch="$(date -u +%s)"
+          artifacts_json="$(
+            gh api \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "/repos/${GITHUB_REPOSITORY}/actions/artifacts?name=${MARKER_ARTIFACT_NAME}&per_page=20"
+          )"
+
+          latest_created_at="$(
+            echo "$artifacts_json" |
+              jq -r '.artifacts | map(select(.expired == false)) | sort_by(.created_at) | reverse | .[0].created_at // ""'
+          )"
+
+          if [ -n "$latest_created_at" ]; then
+            latest_epoch="$(date -u -d "$latest_created_at" +%s)"
+            age_seconds="$((now_epoch - latest_epoch))"
+
+            if [ "$age_seconds" -lt "$COOLDOWN_SECONDS" ]; then
+              wait_seconds="$((COOLDOWN_SECONDS - age_seconds))"
+              echo "::notice::Skipping Supabase restart. Last restart marker was created ${age_seconds}s ago; ${wait_seconds}s remain in the cooldown."
+              {
+                echo "allowed=false"
+                echo "wait_seconds=$wait_seconds"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "allowed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Write restart marker
+        if: steps.cooldown.outputs.allowed == 'true'
+        env:
+          ALERTNAME: ${{ steps.request.outputs.alertname }}
+          PROJECT_REF: ${{ steps.request.outputs.project_ref }}
+          REASON: ${{ steps.request.outputs.reason }}
+        run: |
+          set -euo pipefail
+
+          cat > supabase-restart-marker.json <<EOF
+          {
+            "requested_at": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "project_ref": "$PROJECT_REF",
+            "reason": "$REASON",
+            "alertname": "$ALERTNAME",
+            "run_id": "$GITHUB_RUN_ID",
+            "run_attempt": "$GITHUB_RUN_ATTEMPT"
+          }
+          EOF
+
+      - name: Save restart marker
+        if: steps.cooldown.outputs.allowed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.MARKER_ARTIFACT_NAME }}
+          path: supabase-restart-marker.json
+          retention-days: 7
+
+      - name: Restart Supabase database
+        if: steps.cooldown.outputs.allowed == 'true'
+        env:
+          PROJECT_REF: ${{ steps.request.outputs.project_ref }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_ACCESS_TOKEN:-}" ]; then
+            echo "::error::SUPABASE_ACCESS_TOKEN is required."
+            exit 1
+          fi
+
+          response_file="$(mktemp)"
+          http_status="$(
+            curl -sS -o "$response_file" -w "%{http_code}" \
+              -X PUT "https://api.supabase.com/v1/projects/${PROJECT_REF}/config/database/postgres" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              -H "Content-Type: application/json" \
+              --data '{"restart_database":true}'
+          )"
+
+          if [ "$http_status" -lt 200 ] || [ "$http_status" -ge 300 ]; then
+            echo "::error::Supabase restart request failed with HTTP ${http_status}."
+            cat "$response_file"
+            exit 1
+          fi
+
+          echo "Supabase restart request accepted with HTTP ${http_status}."
+
+      - name: Summarize
+        if: always()
+        env:
+          COOLDOWN_ALLOWED: ${{ steps.cooldown.outputs.allowed }}
+          REQUEST_ALLOWED: ${{ steps.request.outputs.allowed }}
+          PROJECT_REF: ${{ steps.request.outputs.project_ref }}
+        run: |
+          {
+            echo "## Supabase restart"
+            echo
+            echo "- Project ref: ${PROJECT_REF:-$SUPABASE_PROJECT_REF}"
+            echo "- Request accepted: ${REQUEST_ALLOWED:-false}"
+            echo "- Cooldown allowed restart: ${COOLDOWN_ALLOWED:-false}"
+            echo "- Cooldown: ${COOLDOWN_SECONDS}s"
+          } >> "$GITHUB_STEP_SUMMARY"
