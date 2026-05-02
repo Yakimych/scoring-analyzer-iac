@@ -14,6 +14,65 @@ export default $config({
   async run() {
     const dbPassword = process.env.SUPABASE_DB_PASSWORD!;
     const region = "eu-central-1";
+    const grafanaPrometheusDatasourceUid = "grafanacloud-prom";
+    const grafanaExpressionDatasourceUid = "-100";
+    const supabaseAlertRunbookUrl =
+      "https://supabase.com/docs/guides/troubleshooting/supabase-grafana-memory-charts";
+
+    const compactPromQl = (query: string) => query.replace(/\s+/g, " ").trim();
+
+    const supabaseMetricsSelector = (projectRef: string) =>
+      `{supabase_project_ref="${projectRef}", supabase_identifier="${projectRef}"}`;
+
+    const prometheusAlertQueryModel = (refId: string, expr: string) =>
+      JSON.stringify({
+        datasource: {
+          type: "prometheus",
+          uid: grafanaPrometheusDatasourceUid,
+        },
+        editorMode: "code",
+        expr,
+        instant: true,
+        intervalMs: 1000,
+        maxDataPoints: 43200,
+        refId,
+      });
+
+    const thresholdConditionModel = (
+      refId: string,
+      queryRefId: string,
+      threshold: number,
+    ) =>
+      JSON.stringify({
+        conditions: [
+          {
+            evaluator: {
+              params: [threshold],
+              type: "gt",
+            },
+            operator: {
+              type: "and",
+            },
+            query: {
+              params: [queryRefId],
+            },
+            reducer: {
+              params: [],
+              type: "last",
+            },
+            type: "query",
+          },
+        ],
+        datasource: {
+          type: "__expr__",
+          uid: grafanaExpressionDatasourceUid,
+        },
+        hide: false,
+        intervalMs: 1000,
+        maxDataPoints: 43200,
+        refId,
+        type: "classic_conditions",
+      });
 
     const supabaseProject = new supabase.Project("ScoringAnalyzer", {
       organizationId: process.env.SUPABASE_ORG_ID!,
@@ -110,20 +169,195 @@ export default $config({
       { provider: grafanaStackProvider },
     );
 
-    // Scrape Supabase metrics endpoint every 120s
-    new grafana.connections.MetricsEndpointScrapeJob(
-      "SupabaseMetricsScrapeJob",
+    const supabaseAlertsFolder = new grafana.oss.Folder(
+      "SupabaseAlertsFolder",
       {
-        stackId: grafanaStack.id,
-        name: "supabase-scoring-analyzer",
-        enabled: true,
-        authenticationMethod: "basic",
-        authenticationBasicUsername: "service_role",
-        authenticationBasicPassword: serviceRoleKey,
-        url: $interpolate`https://${supabaseProject.id}.supabase.co/customer/v1/privileged/metrics`,
-        scrapeIntervalSeconds: 120,
+        uid: "scoring-analyzer-supabase-alerts",
+        title: "Scoring Analyzer Supabase Alerts",
+        preventDestroyIfNotEmpty: true,
       },
       { provider: grafanaStackProvider },
+    );
+
+    // Scrape Supabase metrics endpoint every 120s
+    const supabaseMetricsScrapeJob =
+      new grafana.connections.MetricsEndpointScrapeJob(
+        "SupabaseMetricsScrapeJob",
+        {
+          stackId: grafanaStack.id,
+          name: "supabase-scoring-analyzer",
+          enabled: true,
+          authenticationMethod: "basic",
+          authenticationBasicUsername: "service_role",
+          authenticationBasicPassword: serviceRoleKey,
+          url: $interpolate`https://${supabaseProject.id}.supabase.co/customer/v1/privileged/metrics`,
+          scrapeIntervalSeconds: 120,
+        },
+        { provider: grafanaStackProvider },
+      );
+
+    const memoryPressureExpr = supabaseProject.id.apply((projectRef) => {
+      const selector = supabaseMetricsSelector(projectRef);
+
+      return compactPromQl(`
+        (
+          max(
+            100 * (
+              1 - node_memory_MemAvailable_bytes${selector}
+                / node_memory_MemTotal_bytes${selector}
+            ) > bool 90
+          ) or vector(0)
+        )
+        +
+        (
+          max(
+            100 * (
+              node_memory_SwapTotal_bytes${selector}
+                - node_memory_SwapFree_bytes${selector}
+            )
+              / node_memory_SwapTotal_bytes${selector}
+              > bool 5
+          ) or vector(0)
+        )
+        > bool 0
+      `);
+    });
+
+    const missingMetricsExpr = supabaseProject.id.apply((projectRef) => {
+      const selector = supabaseMetricsSelector(projectRef);
+
+      return compactPromQl(`
+        (
+          (
+            max(absent_over_time(node_memory_MemAvailable_bytes${selector}[10m]))
+              or vector(0)
+          )
+          +
+          (
+            max(absent_over_time(node_memory_MemTotal_bytes${selector}[10m]))
+              or vector(0)
+          )
+          +
+          (
+            max(absent_over_time(pg_up${selector}[10m]))
+              or vector(0)
+          )
+        ) > bool 0
+      `);
+    });
+
+    const supabaseHealthAlerts = new grafana.alerting.RuleGroup(
+      "SupabaseHealthAlertRules",
+      {
+        name: "scoring-analyzer-supabase-health",
+        folderUid: supabaseAlertsFolder.uid,
+        intervalSeconds: 120,
+        rules: [
+          {
+            uid: "supabase-memory-pressure",
+            name: "Supabase memory pressure",
+            "for": "10m",
+            condition: "B",
+            noDataState: "Alerting",
+            execErrState: "Alerting",
+            annotations: {
+              summary: "Supabase memory pressure is high",
+              description: supabaseProject.id.apply(
+                (projectRef) =>
+                  `Project ${projectRef} has used more than 90% of available memory or more than 5% of swap for at least 10 minutes.`,
+              ),
+              runbook_url: supabaseAlertRunbookUrl,
+            },
+            labels: {
+              service: "supabase",
+              project: supabaseProject.id,
+              severity: "critical",
+              symptom: "memory-pressure",
+            },
+            isPaused: false,
+            datas: [
+              {
+                refId: "A",
+                queryType: "",
+                relativeTimeRange: {
+                  from: 600,
+                  to: 0,
+                },
+                datasourceUid: grafanaPrometheusDatasourceUid,
+                model: memoryPressureExpr.apply((expr) =>
+                  prometheusAlertQueryModel("A", expr),
+                ),
+              },
+              {
+                refId: "B",
+                queryType: "",
+                relativeTimeRange: {
+                  from: 0,
+                  to: 0,
+                },
+                datasourceUid: grafanaExpressionDatasourceUid,
+                model: thresholdConditionModel("B", "A", 0.5),
+              },
+            ],
+          },
+          {
+            uid: "supabase-metrics-missing",
+            name: "Supabase metrics missing",
+            "for": "10m",
+            condition: "B",
+            noDataState: "Alerting",
+            execErrState: "Alerting",
+            annotations: {
+              summary: "Supabase metrics are missing",
+              description: supabaseProject.id.apply(
+                (projectRef) =>
+                  `Grafana has not received core memory/database metrics for project ${projectRef} for at least 10 minutes.`,
+              ),
+              runbook_url:
+                "https://supabase.com/docs/guides/telemetry/metrics/grafana-cloud#5-troubleshooting",
+            },
+            labels: {
+              service: "supabase",
+              project: supabaseProject.id,
+              severity: "critical",
+              symptom: "missing-metrics",
+            },
+            isPaused: false,
+            datas: [
+              {
+                refId: "A",
+                queryType: "",
+                relativeTimeRange: {
+                  from: 600,
+                  to: 0,
+                },
+                datasourceUid: grafanaPrometheusDatasourceUid,
+                model: missingMetricsExpr.apply((expr) =>
+                  prometheusAlertQueryModel("A", expr),
+                ),
+              },
+              {
+                refId: "B",
+                queryType: "",
+                relativeTimeRange: {
+                  from: 0,
+                  to: 0,
+                },
+                datasourceUid: grafanaExpressionDatasourceUid,
+                model: thresholdConditionModel("B", "A", 0.5),
+              },
+            ],
+          },
+        ],
+      },
+      {
+        provider: grafanaStackProvider,
+        dependsOn: [
+          supabaseIntegration,
+          supabaseAlertsFolder,
+          supabaseMetricsScrapeJob,
+        ],
+      },
     );
 
     return {
@@ -131,6 +365,8 @@ export default $config({
       vercelProjectId: vercelProject.id,
       grafanaStackUrl: grafanaStack.url,
       grafanaDashboardFolder: supabaseIntegration.dashboardFolder,
+      grafanaSupabaseAlertsFolder: supabaseAlertsFolder.url,
+      grafanaSupabaseHealthAlertGroup: supabaseHealthAlerts.name,
     };
   },
 });
