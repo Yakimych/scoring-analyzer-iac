@@ -109,7 +109,7 @@ To prevent repeated project restarts during a noisy incident, the workflow seria
 
 Grafana passes `restart_only_if_unhealthy=true`, so the workflow skips the restart when Supabase reports `ACTIVE_HEALTHY`. Manual runs expose the same parameter and default it to `false` so an operator can force a restart.
 
-The project restart is implemented with the documented Supabase Management API project lifecycle endpoints: pause the project, wait until it is inactive, then restore it and wait until it is active again.
+The project restart calls Supabase's platform restart endpoint and then waits until the project status returns to an active state.
 
 Then run:
 

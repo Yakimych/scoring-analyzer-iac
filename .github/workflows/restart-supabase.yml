@@ -26,8 +26,7 @@ concurrency:
 env:
   COOLDOWN_SECONDS: "600"
   MARKER_ARTIFACT_NAME: supabase-restart-marker-rlyhhlwyzeqhoxlralre
-  PAUSE_TIMEOUT_SECONDS: "600"
-  RESTORE_TIMEOUT_SECONDS: "900"
+  RESTART_TIMEOUT_SECONDS: "900"
   SUPABASE_PROJECT_REF: rlyhhlwyzeqhoxlralre
 
 jobs:
@@ -246,18 +245,16 @@ jobs:
             supabase_api GET "/v1/projects/${PROJECT_REF}" | jq -r '.status // "UNKNOWN"'
           }
 
-          wait_for_status() {
+          wait_for_restart() {
             local timeout_seconds="$1"
-            local desired_regex="$2"
-            local label="$3"
             local elapsed_seconds=0
             local status
 
             while [ "$elapsed_seconds" -le "$timeout_seconds" ]; do
               status="$(project_status)"
-              echo "Supabase project status while waiting for ${label}: ${status}"
+              echo "Supabase project status while waiting for restart completion: ${status}"
 
-              if [[ "$status" =~ $desired_regex ]]; then
+              if [[ "$status" =~ ^ACTIVE ]]; then
                 return 0
               fi
 
@@ -265,24 +262,16 @@ jobs:
               elapsed_seconds="$((elapsed_seconds + 15))"
             done
 
-            echo "::error::Timed out waiting for Supabase project to reach ${label}."
+            echo "::error::Timed out waiting for Supabase project restart to complete."
             exit 1
           }
 
           current_status="${INITIAL_STATUS:-$(project_status)}"
           echo "Initial Supabase project status: ${current_status}"
 
-          if [[ "$current_status" =~ ^(INACTIVE|PAUSED)$ ]]; then
-            echo "Project is already paused; restoring it."
-          else
-            echo "Pausing Supabase project ${PROJECT_REF}."
-            supabase_api POST "/v1/projects/${PROJECT_REF}/pause" > /dev/null
-            wait_for_status "$PAUSE_TIMEOUT_SECONDS" "^(INACTIVE|PAUSED)$" "paused"
-          fi
-
-          echo "Restoring Supabase project ${PROJECT_REF}."
-          supabase_api POST "/v1/projects/${PROJECT_REF}/restore" > /dev/null
-          wait_for_status "$RESTORE_TIMEOUT_SECONDS" "^ACTIVE" "active"
+          echo "Restarting Supabase project ${PROJECT_REF}."
+          supabase_api POST "/platform/projects/${PROJECT_REF}/restart" '{}' > /dev/null
+          wait_for_restart "$RESTART_TIMEOUT_SECONDS"
 
           echo "Supabase project restart completed."
 
