@@ -242,7 +242,7 @@ export default $config({
             100 * (
               1 - node_memory_MemAvailable_bytes${selector}
                 / node_memory_MemTotal_bytes${selector}
-            ) > bool 90
+            ) > bool 99
           ) or vector(0)
         )
         +
@@ -307,7 +307,7 @@ export default $config({
               summary: "Supabase memory pressure is high",
               description: supabaseProject.id.apply(
                 (projectRef) =>
-                  `Project ${projectRef} has used more than 90% of available memory or more than 5% of swap for at least 10 minutes.`,
+                  `Project ${projectRef} has used more than 99% of available memory or more than 5% of swap for at least 10 minutes.`,
               ),
               runbook_url: supabaseAlertRunbookUrl,
             },
