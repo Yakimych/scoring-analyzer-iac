@@ -348,12 +348,6 @@ export default $config({
             name: "Supabase metrics missing",
             for: "10m",
             condition: "B",
-            notificationSettings: {
-              contactPoint: supabaseRestartContactPoint.name,
-              groupInterval: "10m",
-              groupWait: "30s",
-              repeatInterval: "10m",
-            },
             noDataState: "Alerting",
             execErrState: "Alerting",
             annotations: {
