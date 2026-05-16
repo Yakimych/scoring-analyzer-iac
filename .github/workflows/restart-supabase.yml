@@ -25,9 +25,9 @@ concurrency:
 
 env:
   COOLDOWN_SECONDS: "600"
-  MARKER_ARTIFACT_NAME: supabase-restart-marker-rlyhhlwyzeqhoxlralre
+  MARKER_ARTIFACT_NAME: supabase-restart-marker-mjvnreuihghpcvbqfgzy
   RESTART_TIMEOUT_SECONDS: "900"
-  SUPABASE_PROJECT_REF: rlyhhlwyzeqhoxlralre
+  SUPABASE_PROJECT_REF: mjvnreuihghpcvbqfgzy
 
 jobs:
   restart:
