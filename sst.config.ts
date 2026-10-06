@@ -1,4 +1,37 @@
 /// <reference path="./.sst/platform/config.d.ts" />
+
+function requiredEnv(key: string) {
+  const value = process.env[key];
+
+  if (!value) {
+    throw new Error(`${key} is required to deploy the infrastructure.`);
+  }
+
+  return value;
+}
+
+// Google sign-in for scoring-analyzer-web (Better Auth). In CI the plain values
+// are GitHub Actions variables and the credentials are secrets; see
+// .github/workflows/deploy-infra.yml.
+function authEnvironmentVariables() {
+  const variables: { key: string; sensitive: boolean }[] = [
+    { key: "BETTER_AUTH_SECRET", sensitive: true },
+    { key: "BETTER_AUTH_URL", sensitive: false },
+    { key: "GOOGLE_CLIENT_ID", sensitive: false },
+    { key: "GOOGLE_CLIENT_SECRET", sensitive: true },
+    { key: "SUPERUSER_EMAIL", sensitive: false },
+  ];
+
+  // Production only: Google sign-in can't complete on preview URLs, since each
+  // would need its own registered redirect URI.
+  return variables.map(({ key, sensitive }) => ({
+    key,
+    value: requiredEnv(key),
+    targets: ["production"],
+    sensitive,
+  }));
+}
+
 export default $config({
   app(input) {
     return {
@@ -41,6 +74,7 @@ export default $config({
           targets: ["production", "preview"],
           sensitive: true,
         },
+        ...authEnvironmentVariables(),
       ],
     });
 

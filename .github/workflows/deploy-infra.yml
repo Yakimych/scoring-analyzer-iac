@@ -12,6 +12,13 @@ env:
   VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
   GRAFANA_CLOUD_ACCESS_POLICY_TOKEN: ${{ secrets.GRAFANA_CLOUD_ACCESS_POLICY_TOKEN }}
   SCORING_ANALYZER_ALERT_DISPATCH_TOKEN: ${{ secrets.SCORING_ANALYZER_ALERT_DISPATCH_TOKEN }}
+  # Google sign-in for scoring-analyzer-web, passed on to Vercel. Plain values
+  # are repository variables; credentials are repository secrets.
+  BETTER_AUTH_URL: ${{ vars.BETTER_AUTH_URL }}
+  GOOGLE_CLIENT_ID: ${{ vars.GOOGLE_CLIENT_ID }}
+  SUPERUSER_EMAIL: ${{ vars.SUPERUSER_EMAIL }}
+  BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+  GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
 
 jobs:
   plan:

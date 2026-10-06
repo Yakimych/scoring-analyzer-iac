@@ -38,7 +38,7 @@ You need accounts on two services:
 
 ## Required secrets
 
-Seven secrets must be configured in GitHub at **Settings > Secrets and variables > Actions**.
+These must be configured as **repository** secrets and variables in GitHub at **Settings > Secrets and variables > Actions**. The `plan` job has no environment, so it can't read environment-level ones.
 
 ### Cloudflare (SST state storage)
 
@@ -60,6 +60,18 @@ Seven secrets must be configured in GitHub at **Settings > Secrets and variables
 | Secret             | How to get it                                                                                                                                                                                                                                                           |
 | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `VERCEL_API_TOKEN` | Go to https://vercel.com/account/tokens > **Create Token**. Give it a descriptive name (e.g. `sst-deploy`), pick a scope (your personal account or team), and set an expiration. Copy the token value immediately — it won't be shown again. |
+
+### Google sign-in (scoring-analyzer-web)
+
+Passed to the Vercel project as production environment variables. See the "Authentication" section of the scoring-analyzer-web README.
+
+| Name                   | Kind     | Value                                                                                   |
+| ---------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `BETTER_AUTH_SECRET`   | Secret   | Random string, e.g. `openssl rand -base64 32`.                                          |
+| `GOOGLE_CLIENT_SECRET` | Secret   | From the Google OAuth client (Google Cloud Console > APIs & Services > Credentials).    |
+| `BETTER_AUTH_URL`      | Variable | Production URL, `https://scoring-analyzer.vercel.app`.                                  |
+| `GOOGLE_CLIENT_ID`     | Variable | From the same Google OAuth client.                                                      |
+| `SUPERUSER_EMAIL`      | Variable | Comma-separated emails that always have access and can create invites.                  |
 
 ### Grafana Cloud (metrics monitoring)
 
@@ -99,6 +111,11 @@ SUPABASE_DB_PASSWORD=...
 VERCEL_API_TOKEN=...
 GRAFANA_CLOUD_ACCESS_POLICY_TOKEN=...
 SCORING_ANALYZER_ALERT_DISPATCH_TOKEN=...
+BETTER_AUTH_SECRET=...
+BETTER_AUTH_URL=...
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+SUPERUSER_EMAIL=...
 ```
 
 ## Supabase restart automation
